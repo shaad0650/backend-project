@@ -197,7 +197,7 @@ const updateAccountDetails=asyncHandler(async(req,res)=>{
     if(!fullName||!email){
         throw new ApiError(400,"all fields are required")
     }
-    const user=User.findByIdAndUpdate(
+    const user=await User.findByIdAndUpdate(
         req.user._id,
         {
             $set:{
@@ -211,52 +211,103 @@ const updateAccountDetails=asyncHandler(async(req,res)=>{
 })
 // for the updation of files
 //multer middleware also plays a  role in this
-const updateUserAvatar=asyncHandler(async(req,res)=>{
-    const avatarLocalPath=req.file?.path
-    if (!avatarLocalPath){
-        throw new ApiError(400,"avatar file is missing")
+const updateUserCoverImage = asyncHandler(async(req, res) => {
+    const coverImageLocalPath = req.file?.path
+    if (!coverImageLocalPath) {
+        throw new ApiError(400, "cover Image file is missing")
     }
     //upload on cloudinary
-    const avatar=uploadOnCloudinary(avatarLocalPath)
-    if (!avatar.url){
-        throw new ApiError(400,"error while uploading the avatar")
+    const coverImage = await uploadOnCloudinary(coverImageLocalPath)
+    if (!coverImage.url) {
+        throw new ApiError(400, "error while uploading the coverImage")
     }
     //update the user field
-    const user=await User.findByIdAndUpdate(
+    const user = await User.findByIdAndUpdate(
         req.user._id,
         {
-            $set:{
-                    avatar:avatar.url
-                }
+            $set: {
+                coverImage: coverImage.url
+            }
         },
-        {new:true}
+        {new: true}
     ).select("-password")
-    return res.status(200).json(new ApiResponse(200,user,"avatar updated successfully"))
+    return res.status(200).json(200, {}, "cover image updated successfully")
 })
 
-//cover image updation
-const updateUserCoverImage=asyncHandler(async(req,res)=>{
-    const coverImageLocalPath=req.file?.path
-    if (!CoverImageLocalPath){
-        throw new ApiError(400,"cover Image file is missing")
+const getUserChannelProfile = asyncHandler(async(req, res) => {
+    const {username} = req.params
+    if (!username?.trim()) {
+        throw new ApiError(400, "username is missing ")
     }
-    //upload on cloudinary
-    const coverImage=uploadOnCloudinary(coverImageLocalPath)
-    if (!coverImage.url){
-        throw new ApiError(400,"error while uploading the coverImage")
-    }
-    //update the user field
-    const user=await User.findByIdAndUpdate(
-        req.user._id,
+    //got the username from the url
+    //write the channel aggregation pipeplines
+    const channel = await User.aggregate([
         {
-            $set:{
-                    coverImage:coverImage.url
-                }
+            $match: {
+                username: username?.toLowerCase()
+            }
         },
-        {new:true}
-    ).select("-password")
-    return res.status(200).json(200,user,"cover image updated successfully")
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "channel",
+                as: "subscribers"
+            }
+        },
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "subscriber",
+                as: "subscribedTo"
+            }
+        },
+        {
+            $addFields: {
+                subscriberCount: {
+                    $size: "$subscribers"
+                },
+                channelSubscribedToCount: {
+                    $size: "$subscribedTo"
+                },
+                isSubscribed: {
+                    $cond: {
+                        if: {
+                            $in: [
+                                req.user?._id,
+                                "$subscribers.subscriber"
+                            ]
+                        },
+                        then: true,
+                        else: false
+                    }
+                }
+            }
+        },
+        {
+            $project:{
+                fullName:1,
+                username:1,
+                subscriberCount:1,
+                isSubscribed:1,
+                avatar:1,
+                coverImage:1,
+                email:1
+            }
+        }
+    ])
+    if (!channel.length){
+        throw new ApiError(404,"channel does not exist")
+    }
+    return res.status(200).json(new ApiResponse(200,channel[0],"user channel fetched successfully"))
 })
-
-
-export { registerUser , loginUser , logoutUser,refreshAccessToken , getCurrentUser,changeCurrentPassword ,updateAccountDetails,updateUserAvatar,updateUserCoverImage} 
+export { registerUser ,
+     loginUser ,
+      logoutUser,
+      refreshAccessToken ,
+       getCurrentUser,
+       changeCurrentPassword ,
+       updateAccountDetails,
+       updateUserAvatar,
+       updateUserCoverImage,getUserChannelProfile} 
